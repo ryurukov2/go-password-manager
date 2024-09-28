@@ -1,10 +1,11 @@
 package main
 
 import (
-	"encoding/json"
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type PasswordEntry struct {
@@ -15,53 +16,12 @@ type PasswordEntry struct {
 
 const dataFile = "passwords.json"
 
-func readEntries() ([]PasswordEntry, error) {
-	var entries []PasswordEntry
-
-	_, err := os.Stat(dataFile)
-	if os.IsNotExist(err) {
-		return entries, nil
-	}
-
-	data, err := os.ReadFile(dataFile)
-	if err != nil {
-		return nil, fmt.Errorf("could not read file: %v", err)
-	}
-	err = json.Unmarshal(data, &entries)
-	if err != nil {
-		return nil, fmt.Errorf("could not unmarshal data: %v", err)
-	}
-	return entries, nil
-}
-
-func saveEntry(entry PasswordEntry) error {
-	entries, err := readEntries()
-	if err != nil {
-		return fmt.Errorf("could not read entries: %v", err)
-	}
-
-	entries = append(entries, entry)
-
-	data, err := json.MarshalIndent(entries, "", " ")
-	if err != nil {
-		return fmt.Errorf("could not marshal entries: %v", err)
-	}
-
-	err = os.WriteFile(dataFile, data, 0644)
-	if err != nil {
-		return fmt.Errorf("could not write to file: %v", err)
-	}
-
-	fmt.Println(("Entry saved successfully!"))
-	return nil
-}
-
-func addCommand() {
+func addCommand(args []string) {
 	addCmd := flag.NewFlagSet("add", flag.ExitOnError)
 	service := addCmd.String("s", "", "Service name")
 	username := addCmd.String("u", "", "Username")
 	password := addCmd.String("p", "", "Password")
-	addCmd.Parse(os.Args[2:])
+	addCmd.Parse(args)
 	if *service == "" || *username == "" || *password == "" {
 		fmt.Println("Usage: add -s=<service> -u=<username> -p=<password>")
 		return
@@ -79,10 +39,10 @@ func addCommand() {
 
 }
 
-func getCommand() {
+func getCommand(args []string) {
 	getCmd := flag.NewFlagSet("get", flag.ExitOnError)
 	service := getCmd.String("s", "", "Service name")
-	getCmd.Parse(os.Args[2:])
+	getCmd.Parse(args)
 
 	if *service == "" {
 		fmt.Println("Usage: get -s=<service>")
@@ -94,34 +54,23 @@ func getCommand() {
 		fmt.Println("Error reading the file:", err)
 		return
 	}
-
+	found := false
 	for _, entry := range entries {
 		if entry.Service == *service {
 			fmt.Printf("Username: %v, Password: %v\n", entry.Username, entry.Password)
-			return
+			found = true
 		}
 	}
-	fmt.Println("No entry found for that service.")
+	if !found {
+		fmt.Println("No entry found for that service.")
+	}
 }
 
-func saveUpdatedEntries(entries []PasswordEntry) error {
-	data, err := json.MarshalIndent(entries, "", "  ")
-	if err != nil {
-		return fmt.Errorf("could not marshal updated entries: %v", err)
-	}
-
-	err = os.WriteFile(dataFile, data, 0644)
-	if err != nil {
-		return fmt.Errorf("could not write updated entries to file: %v", err)
-	}
-
-	return nil
-}
-func deleteCommand() {
+func deleteCommand(args []string) {
 	deleteCmd := flag.NewFlagSet("delete", flag.ExitOnError)
 	service := deleteCmd.String("s", "", "Service name")
 	username := deleteCmd.String("u", "", "Service name")
-	deleteCmd.Parse(os.Args[2:])
+	deleteCmd.Parse(args)
 	if *service == "" || *username == "" {
 		fmt.Println("Usage: delete -s=<service> -u=<username>")
 		return
@@ -156,20 +105,43 @@ func deleteCommand() {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Expected 'add', 'get' or 'delete' subcommands")
-		os.Exit(1)
-	}
+	fmt.Println("Welcome to your Password Manager!")
+	fmt.Println("Available commands: add, get, delete, exit")
 
-	switch os.Args[1] {
-	case "add":
-		addCommand()
-	case "get":
-		getCommand()
-	case "delete":
-		deleteCommand()
-	default:
-		fmt.Println("Unknown command:", os.Args[1])
-		os.Exit(1)
+	for {
+
+		fmt.Print("> ")
+
+		reader := bufio.NewReader(os.Stdin)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading input:", err)
+			continue
+		}
+
+		input = strings.TrimSpace(input)
+
+		if input == "" {
+			fmt.Println("Please enter a command.")
+			continue
+		}
+
+		args := strings.Fields(input)
+		command := args[0]
+
+		switch command {
+		case "add":
+			addCommand(args[1:])
+		case "get":
+			getCommand(args[1:])
+		case "delete":
+			deleteCommand(args[1:])
+		case "exit":
+			fmt.Println("Exiting the Password Manager. Goodbye!")
+			os.Exit(0)
+		default:
+			fmt.Println("Unknown command:", command)
+			fmt.Println("Available commands: add, get, delete, exit")
+		}
 	}
 }
