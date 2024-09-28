@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -105,9 +106,30 @@ func deleteCommand(args []string) {
 }
 
 func main() {
+	if !isRunningInTerminal() {
+		fmt.Println("Launching in a new terminal...")
+		if err := launchInNewTerminal(); err != nil {
+			fmt.Printf("Error launching in new terminal: %v\n", err)
+		}
+		return
+	}
 	fmt.Println("Welcome to your Password Manager!")
-	fmt.Println("Available commands: add, get, delete, exit")
 
+	if _, err := os.Stat("./salt.txt"); errors.Is(err, os.ErrNotExist) {
+		setupMasterPassword()
+	}
+
+	isAuthd, err := verifyMasterPassword()
+	if err != nil {
+		fmt.Println("Error verifying master password -", err)
+	}
+
+	if !isAuthd {
+		fmt.Println("Login unsuccessful. Exiting.")
+		os.Exit(1)
+	}
+
+	fmt.Println("Available commands: add, get, delete, exit")
 	for {
 
 		fmt.Print("> ")
