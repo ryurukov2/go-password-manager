@@ -22,8 +22,6 @@ func launchInNewTerminal() error {
 	switch runtime.GOOS {
 	case "windows":
 		return launchInWindowsTerminal()
-	case "darwin":
-		return launchInMacOSTerminal()
 	case "linux":
 		return launchInLinuxTerminal()
 	default:
@@ -38,16 +36,6 @@ func launchInWindowsTerminal() error {
 	}
 	cmd := exec.Command("cmd", "/C", "start", "cmd", "/K", exePath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
-	return cmd.Start()
-}
-
-func launchInMacOSTerminal() error {
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %v", err)
-	}
-	cmd := exec.Command("open", "-a", "Terminal", exePath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd.Start()
 }
 
