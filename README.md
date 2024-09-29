@@ -35,9 +35,9 @@ This is a simple password manager CLI tool.
 
 ## Potential issues and fixes
 
-- on Linux, when downloading the compiled executable, often it will not have execute permissions by default. To fix this, navigate to the directory where the file is and run **chmod +x password-manager-linux-amd64** in the terminal
+- on Linux, when downloading the compiled executable, often it will not have execute permissions by default. To fix this, navigate to the directory where the file is and run '**chmod +x password-manager-linux-amd64**' in the terminal
 
 ## Compile instructions
 - install [Go](https://go.dev/doc/install)
 - clone the repository into a folder
-- run **go build**. This will compile the program with the name of the folder. Optionally, you can run **go build -o name of your choice**
+- run '**go build**'. This will compile the program with the name of the folder. Optionally, you can run '**go build -o name of your choice**'
