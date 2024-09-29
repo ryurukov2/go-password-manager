@@ -26,6 +26,13 @@ func readEntries() ([]PasswordEntry, error) {
 }
 
 func saveUpdatedEntries(entries []PasswordEntry) error {
+	if len(entries) == 0 {
+		e := os.Remove("passwords.json")
+		if e != nil {
+			return fmt.Errorf("unable to delete passwords file: %v", e)
+		}
+		return nil
+	}
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return fmt.Errorf("could not marshal updated entries: %v", err)

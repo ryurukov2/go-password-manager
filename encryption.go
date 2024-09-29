@@ -1,11 +1,15 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"syscall"
 
@@ -75,25 +79,26 @@ func setupMasterPassword() (string, error) {
 	return string(derivedKey), nil
 }
 
-func verifyMasterPassword() (bool, error) {
+func verifyMasterPasswordAndGetKey() ([]byte, error) {
 	saltHex, err := os.ReadFile("salt.txt")
+	var ret []byte
 	if err != nil {
-		return false, fmt.Errorf("failed to read salt: %v", err)
+		return ret, fmt.Errorf("failed to read salt: %v", err)
 	}
 
 	salt, err := hex.DecodeString(string(saltHex))
 	if err != nil {
-		return false, fmt.Errorf("failed to decode salt: %v", err)
+		return ret, fmt.Errorf("failed to decode salt: %v", err)
 	}
 
 	storedKeyHash, err := os.ReadFile("key_hash.txt")
 	if err != nil {
-		return false, fmt.Errorf("failed to read key hash: %v", err)
+		return ret, fmt.Errorf("failed to read key hash: %v", err)
 	}
 
 	masterPassword, err := promptMasterPassword("Enter your master password: ")
 	if err != nil {
-		return false, err
+		return ret, err
 	}
 
 	derivedKey := deriveKeyFromPassword(masterPassword, salt)
@@ -102,9 +107,65 @@ func verifyMasterPassword() (bool, error) {
 
 	if subtle.ConstantTimeCompare([]byte(enteredKeyHash), storedKeyHash) == 1 {
 		fmt.Println("Login successful.")
-		return true, nil
+		return derivedKey, nil
 	}
 
 	fmt.Println("Incorrect master password.")
-	return false, nil
+	return ret, nil
+}
+
+func encryptData(plaintext, key []byte) (string, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher block: %v", err)
+	}
+
+	// GCM mode requires a nonce (IV)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	// Generate a random nonce of appropriate length
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %v", err)
+	}
+
+	// Encrypt and authenticate the plaintext
+	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+	return hex.EncodeToString(ciphertext), nil
+}
+
+func decryptData(ciphertextHex string, key []byte) (string, error) {
+	ciphertext, err := hex.DecodeString(ciphertextHex)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode ciphertext: %v", err)
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher block: %v", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", errors.New("ciphertext too short")
+	}
+
+	// Extract the nonce from the beginning of the ciphertext
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+
+	// Decrypt and verify the ciphertext
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt data: %v", err)
+	}
+
+	return string(plaintext), nil
 }

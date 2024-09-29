@@ -17,7 +17,7 @@ type PasswordEntry struct {
 
 const dataFile = "passwords.json"
 
-func addCommand(args []string) {
+func addCommand(args []string, key []byte) {
 	addCmd := flag.NewFlagSet("add", flag.ExitOnError)
 	service := addCmd.String("s", "", "Service name")
 	username := addCmd.String("u", "", "Username")
@@ -32,7 +32,22 @@ func addCommand(args []string) {
 		Username: *username,
 		Password: *password,
 	}
-	if err := saveEntry(entry); err != nil {
+	encryptedUsername, err := encryptData([]byte(entry.Username), key)
+	if err != nil {
+		fmt.Println("Unable to encrypt username:", err)
+		return
+	}
+	encryptedPassword, err := encryptData([]byte(entry.Password), key)
+	if err != nil {
+		fmt.Println("Unable to encrypt password:", err)
+		return
+	}
+	encryptedEntry := PasswordEntry{
+		Service:  entry.Service,
+		Username: string(encryptedUsername[:]),
+		Password: string(encryptedPassword[:]),
+	}
+	if err := saveEntry(encryptedEntry); err != nil {
 		fmt.Println("Error saving entry:", err)
 		return
 	}
@@ -40,7 +55,7 @@ func addCommand(args []string) {
 
 }
 
-func getCommand(args []string) {
+func getCommand(args []string, key []byte) {
 	getCmd := flag.NewFlagSet("get", flag.ExitOnError)
 	service := getCmd.String("s", "", "Service name")
 	getCmd.Parse(args)
@@ -58,7 +73,15 @@ func getCommand(args []string) {
 	found := false
 	for _, entry := range entries {
 		if entry.Service == *service {
-			fmt.Printf("Username: %v, Password: %v\n", entry.Username, entry.Password)
+			decryptedUsername, err := decryptData(entry.Username, key)
+			if err != nil {
+				fmt.Println("Unable to decrypt username:", err)
+			}
+			decryptedPw, err := decryptData(entry.Password, key)
+			if err != nil {
+				fmt.Println("Unable to decrypt password:", err)
+			}
+			fmt.Printf("Username: %v, Password: %v\n", decryptedUsername, decryptedPw)
 			found = true
 		}
 	}
@@ -67,11 +90,12 @@ func getCommand(args []string) {
 	}
 }
 
-func deleteCommand(args []string) {
+func deleteCommand(args []string, key []byte) {
 	deleteCmd := flag.NewFlagSet("delete", flag.ExitOnError)
 	service := deleteCmd.String("s", "", "Service name")
 	username := deleteCmd.String("u", "", "Service name")
 	deleteCmd.Parse(args)
+
 	if *service == "" || *username == "" {
 		fmt.Println("Usage: delete -s=<service> -u=<username>")
 		return
@@ -83,10 +107,16 @@ func deleteCommand(args []string) {
 	updatedEntries := []PasswordEntry{}
 	found := false
 	for _, entry := range entries {
-		if entry.Service == *service && entry.Username == *username {
-			found = true
-			fmt.Printf("Deleting entry for username %s for service %s\n", *username, *service)
-			continue
+		if entry.Service == *service {
+			decryptedUsername, err := decryptData(entry.Username, key)
+			if err != nil {
+				fmt.Println("Unable to decrypt username:", err)
+			}
+			if decryptedUsername == *username {
+				found = true
+				fmt.Printf("Deleting entry for username %s for service %s\n", *username, *service)
+				continue
+			}
 		}
 		updatedEntries = append(updatedEntries, entry)
 	}
@@ -119,12 +149,12 @@ func main() {
 		setupMasterPassword()
 	}
 
-	isAuthd, err := verifyMasterPassword()
+	derivedKey, err := verifyMasterPasswordAndGetKey()
 	if err != nil {
 		fmt.Println("Error verifying master password -", err)
 	}
 
-	if !isAuthd {
+	if len(derivedKey) == 0 {
 		fmt.Println("Login unsuccessful. Exiting.")
 		os.Exit(1)
 	}
@@ -153,11 +183,11 @@ func main() {
 
 		switch command {
 		case "add":
-			addCommand(args[1:])
+			addCommand(args[1:], derivedKey)
 		case "get":
-			getCommand(args[1:])
+			getCommand(args[1:], derivedKey)
 		case "delete":
-			deleteCommand(args[1:])
+			deleteCommand(args[1:], derivedKey)
 		case "exit":
 			fmt.Println("Exiting the Password Manager. Goodbye!")
 			os.Exit(0)
