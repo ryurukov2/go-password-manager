@@ -6,11 +6,16 @@ This is a simple password manager CLI tool.
 - if you download the executable, it is recommended to move it out of your Downloads folder into a folder of its own (e.g. C:/Program Files/Password Manager)
 - run the program
 - available commands and flags after authentication with master password:
-    -- add -s=service name -u=username -p=password
-    -- get -s=service name
-    -- delete -s=service name -u=username
-    -- exit
-    (!) there should be no whitespaces in the service name, username or password
+
+  -- add -s=service name -u=username -p=password
+
+  -- get -s=service name
+
+  -- delete -s=service name -u=username
+
+  -- exit
+
+  (!) there should be no whitespaces in the service name, username or password
 
 
 ## Features:
