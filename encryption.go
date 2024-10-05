@@ -120,19 +120,16 @@ func encryptData(plaintext, key []byte) (string, error) {
 		return "", fmt.Errorf("failed to create cipher block: %v", err)
 	}
 
-	// GCM mode requires a nonce (IV)
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return "", fmt.Errorf("failed to create GCM: %v", err)
 	}
 
-	// Generate a random nonce of appropriate length
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %v", err)
 	}
 
-	// Encrypt and authenticate the plaintext
 	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
 	return hex.EncodeToString(ciphertext), nil
 }
@@ -158,10 +155,8 @@ func decryptData(ciphertextHex string, key []byte) (string, error) {
 		return "", errors.New("ciphertext too short")
 	}
 
-	// Extract the nonce from the beginning of the ciphertext
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 
-	// Decrypt and verify the ciphertext
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt data: %v", err)
