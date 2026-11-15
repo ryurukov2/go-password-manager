@@ -1,3 +1,10 @@
+# Vault data — never commit
 key_hash.*
 salt.*
 passwords.*
+
+# Build output
+/password-manager
+/password-manager-*
+/dist/
+*.exe
