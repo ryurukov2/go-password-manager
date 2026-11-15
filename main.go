@@ -1,199 +1,139 @@
+// Command password-manager is a small, local, encrypted password manager for the terminal.
 package main
 
 import (
-	"bufio"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
 )
 
-type PasswordEntry struct {
-	Service  string `json:"service"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
+const maxAttempts = 3
 
-const dataFile = "passwords.json"
-
-func addCommand(args []string, key []byte) {
-	addCmd := flag.NewFlagSet("add", flag.ExitOnError)
-	service := addCmd.String("s", "", "Service name")
-	username := addCmd.String("u", "", "Username")
-	password := addCmd.String("p", "", "Password")
-	addCmd.Parse(args)
-	if *service == "" || *username == "" || *password == "" {
-		fmt.Println("Usage: add -s=<service> -u=<username> -p=<password>")
-		return
-	}
-	entry := PasswordEntry{
-		Service:  *service,
-		Username: *username,
-		Password: *password,
-	}
-	encryptedUsername, err := encryptData([]byte(entry.Username), key)
-	if err != nil {
-		fmt.Println("Unable to encrypt username:", err)
-		return
-	}
-	encryptedPassword, err := encryptData([]byte(entry.Password), key)
-	if err != nil {
-		fmt.Println("Unable to encrypt password:", err)
-		return
-	}
-	encryptedEntry := PasswordEntry{
-		Service:  entry.Service,
-		Username: string(encryptedUsername[:]),
-		Password: string(encryptedPassword[:]),
-	}
-	if err := saveEntry(encryptedEntry); err != nil {
-		fmt.Println("Error saving entry:", err)
-		return
-	}
-	fmt.Printf("Added: %s, %s, %s\n", *service, *username, *password)
-
-}
-
-func getCommand(args []string, key []byte) {
-	getCmd := flag.NewFlagSet("get", flag.ExitOnError)
-	service := getCmd.String("s", "", "Service name")
-	getCmd.Parse(args)
-
-	if *service == "" {
-		fmt.Println("Usage: get -s=<service>")
-		return
-	}
-
-	entries, err := readEntries()
-	if err != nil {
-		fmt.Println("Error reading the file:", err)
-		return
-	}
-	found := false
-	for _, entry := range entries {
-		if entry.Service == *service {
-			decryptedUsername, err := decryptData(entry.Username, key)
-			if err != nil {
-				fmt.Println("Unable to decrypt username:", err)
-			}
-			decryptedPw, err := decryptData(entry.Password, key)
-			if err != nil {
-				fmt.Println("Unable to decrypt password:", err)
-			}
-			fmt.Printf("Username: %v, Password: %v\n", decryptedUsername, decryptedPw)
-			found = true
-		}
-	}
-	if !found {
-		fmt.Println("No entry found for that service.")
-	}
-}
-
-func deleteCommand(args []string, key []byte) {
-	deleteCmd := flag.NewFlagSet("delete", flag.ExitOnError)
-	service := deleteCmd.String("s", "", "Service name")
-	username := deleteCmd.String("u", "", "Service name")
-	deleteCmd.Parse(args)
-
-	if *service == "" || *username == "" {
-		fmt.Println("Usage: delete -s=<service> -u=<username>")
-		return
-	}
-	entries, err := readEntries()
-	if err != nil {
-		fmt.Println("Error reading the file:", err)
-	}
-	updatedEntries := []PasswordEntry{}
-	found := false
-	for _, entry := range entries {
-		if entry.Service == *service {
-			decryptedUsername, err := decryptData(entry.Username, key)
-			if err != nil {
-				fmt.Println("Unable to decrypt username:", err)
-			}
-			if decryptedUsername == *username {
-				found = true
-				fmt.Printf("Deleting entry for username %s for service %s\n", *username, *service)
-				continue
-			}
-		}
-		updatedEntries = append(updatedEntries, entry)
-	}
-
-	if !found {
-		fmt.Printf("No entry found for username %s for service %s\n", *username, *service)
-		return
-	}
-
-	err = saveUpdatedEntries(updatedEntries)
-	if err != nil {
-		fmt.Println("Error saving updated entries:", err)
-		return
-	}
-	fmt.Println("Entry deleted successfully.")
-
-}
+var version = "dev" // overridden at build time with -ldflags "-X main.version=..."
 
 func main() {
+	dirFlag := flag.String("dir", "", "vault directory (overrides $PASSWORD_MANAGER_DIR)")
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("password-manager", version)
+		return
+	}
+
+	// When started by double-clicking, there is no terminal to type into.
 	if !isRunningInTerminal() {
-		fmt.Println("Launching in a new terminal...")
 		if err := launchInNewTerminal(); err != nil {
-			fmt.Printf("Error launching in new terminal: %v\n", err)
+			fmt.Fprintln(os.Stderr, "This program must be run from a terminal:", err)
+			os.Exit(1)
 		}
 		return
 	}
-	fmt.Println("Welcome to your Password Manager!")
 
-	if _, err := os.Stat("./salt.txt"); errors.Is(err, os.ErrNotExist) {
-		setupMasterPassword()
-	}
-
-	derivedKey, err := verifyMasterPasswordAndGetKey()
+	dir, err := resolveVaultDir(*dirFlag)
 	if err != nil {
-		fmt.Println("Error verifying master password -", err)
+		fatal(err)
+	}
+	vault := &Vault{Dir: dir}
+
+	fmt.Println("Password Manager", version)
+	fmt.Println("Vault:", dir)
+
+	if vault.Exists() {
+		if err := unlock(vault); err != nil {
+			fatal(err)
+		}
+	} else if err := setup(vault); err != nil {
+		fatal(err)
 	}
 
-	if len(derivedKey) == 0 {
-		fmt.Println("Login unsuccessful. Exiting.")
-		os.Exit(1)
-	}
+	a := &app{vault: vault, out: os.Stdout, secret: readSecret}
+	a.repl(os.Stdin)
+	fmt.Println("Goodbye!")
+}
 
-	fmt.Println("Available commands: add, get, delete, exit")
+func setup(v *Vault) error {
+	fmt.Println("No vault found. Let's create one.")
+	fmt.Println("Choose a master password. It is never stored, and it cannot be recovered if forgotten.")
 	for {
-
-		fmt.Print("> ")
-
-		reader := bufio.NewReader(os.Stdin)
-		input, err := reader.ReadString('\n')
+		pw, err := readSecret("New master password: ")
 		if err != nil {
-			fmt.Println("Error reading input:", err)
+			return err
+		}
+		if len(pw) < 8 {
+			fmt.Println("Please use at least 8 characters.")
 			continue
 		}
-
-		input = strings.TrimSpace(input)
-
-		if input == "" {
-			fmt.Println("Please enter a command.")
+		confirm, err := readSecret("Repeat master password: ")
+		if err != nil {
+			return err
+		}
+		if pw != confirm {
+			fmt.Println("Passwords do not match, try again.")
 			continue
 		}
+		if err := v.Create(pw); err != nil {
+			return err
+		}
+		fmt.Println("Vault created.")
+		return nil
+	}
+}
 
-		args := strings.Fields(input)
-		command := args[0]
+func unlock(v *Vault) error {
+	for i := 1; i <= maxAttempts; i++ {
+		pw, err := readSecret("Master password: ")
+		if err != nil {
+			return err
+		}
+		err = v.Unlock(pw)
+		if err == nil {
+			fmt.Println("Unlocked.")
+			return nil
+		}
+		if !errors.Is(err, ErrWrongPassword) {
+			return err
+		}
+		fmt.Printf("Incorrect password (%d/%d).\n", i, maxAttempts)
+	}
+	return errors.New("too many failed attempts")
+}
 
-		switch command {
-		case "add":
-			addCommand(args[1:], derivedKey)
-		case "get":
-			getCommand(args[1:], derivedKey)
-		case "delete":
-			deleteCommand(args[1:], derivedKey)
-		case "exit":
-			fmt.Println("Exiting the Password Manager. Goodbye!")
-			os.Exit(0)
-		default:
-			fmt.Println("Unknown command:", command)
-			fmt.Println("Available commands: add, get, delete, exit")
+// resolveVaultDir picks where the vault files live, in priority order:
+//  1. the -dir flag
+//  2. $PASSWORD_MANAGER_DIR
+//  3. the current directory or the executable's directory, if a vault from an
+//     older version already exists there (older versions used the working dir)
+//  4. the OS config directory, e.g. ~/.config/go-password-manager
+func resolveVaultDir(flagDir string) (string, error) {
+	if flagDir != "" {
+		return filepath.Abs(flagDir)
+	}
+	if env := os.Getenv("PASSWORD_MANAGER_DIR"); env != "" {
+		return filepath.Abs(env)
+	}
+	var legacy []string
+	if wd, err := os.Getwd(); err == nil {
+		legacy = append(legacy, wd)
+	}
+	if exe, err := os.Executable(); err == nil {
+		legacy = append(legacy, filepath.Dir(exe))
+	}
+	for _, d := range legacy {
+		if (&Vault{Dir: d}).Exists() {
+			return d, nil
 		}
 	}
+	cfg, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine a vault directory, use -dir: %w", err)
+	}
+	return filepath.Join(cfg, "go-password-manager"), nil
+}
+
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, "Error:", err)
+	os.Exit(1)
 }
