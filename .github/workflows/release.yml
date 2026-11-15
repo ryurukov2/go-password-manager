@@ -1,0 +1,23 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make test release VERSION=${{ github.ref_name }}
+      - run: cd dist && sha256sum * > checksums.txt
+      - run: gh release create "${{ github.ref_name }}" dist/* --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
